@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Objects;
 
 import static com.example.jonas_project.compartilhado.dominio.ValidacaoDominio.decimalNaoNegativo;
+import static com.example.jonas_project.compartilhado.dominio.ValidacaoDominio.decimalPositivo;
 import static com.example.jonas_project.compartilhado.dominio.ValidacaoDominio.texto;
 
 @Entity
@@ -67,12 +68,48 @@ public class Encomenda {
     @Column(name = "motivo_cancelamento", columnDefinition = "text")
     private String motivoCancelamento;
 
-    @OneToMany(mappedBy = "encomenda", cascade = CascadeType.PERSIST)
-    @OrderBy("id ASC")
-    private List<VersaoEncomenda> versoes = new ArrayList<>();
+    @Column(name = "preco_bruto", precision = 15, scale = 2)
+    private BigDecimal precoBruto;
 
-    @Column(name = "numero_versao_vigente", nullable = false)
-    private int numeroVersaoVigente;
+    @Column(precision = 15, scale = 2)
+    private BigDecimal desconto;
+
+    @Column(name = "esforco_horas", precision = 8, scale = 2)
+    private BigDecimal esforcoHoras;
+
+    @Column(name = "prazo_prometido")
+    private LocalDate prazoPrometido;
+
+    @Column(name = "inicio_planejado_em")
+    private Instant inicioPlanejadoEm;
+
+    @Column(name = "limite_alteracao")
+    private Instant limiteAlteracao;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "aprovada_por_id")
+    private Usuario aprovadaPor;
+
+    @Column(name = "aprovada_em")
+    private Instant aprovadaEm;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "ciencia_por_id")
+    private Usuario cienciaPor;
+
+    @Column(name = "ciencia_em")
+    private Instant cienciaEm;
+
+    @OneToMany(mappedBy = "encomenda", cascade = CascadeType.PERSIST)
+    @OrderBy("ordem ASC")
+    private List<ItemEncomenda> itens = new ArrayList<>();
+
+    @Column(name = "numero_alteracoes", nullable = false)
+    private int numeroAlteracoes;
+
+    @OneToMany(mappedBy = "encomenda", cascade = CascadeType.PERSIST)
+    @OrderBy("ocorridaEm ASC, id ASC")
+    private List<HistoricoEncomenda> historico = new ArrayList<>();
 
     @OneToMany(mappedBy = "encomenda", cascade = CascadeType.PERSIST)
     private List<SolicitacaoAlteracao> solicitacoes = new ArrayList<>();
@@ -112,20 +149,21 @@ public class Encomenda {
         this.canalOrigem = Objects.requireNonNull(canalOrigem, "Informe o canal de origem.");
         this.dataSolicitada = Objects.requireNonNull(dataSolicitada, "Informe a data solicitada.");
         this.cadastradaEm = Objects.requireNonNull(cadastradaEm, "Informe o instante do cadastro.");
-        versoes.add(new VersaoEncomenda(this, List.of(primeiroItem)));
+        adicionarItem(primeiroItem);
     }
 
     public void adicionarItem(ItemEncomenda item) {
         exigirStatus(StatusEncomenda.PENDENTE);
-        versoes.getFirst().adicionarItem(Objects.requireNonNull(item));
+        itens.add(Objects.requireNonNull(item).copiarPara(this, itens.size()));
     }
 
     public void alterarItem(ItemEncomenda item, ItemEncomenda novosDados) {
         exigirStatus(StatusEncomenda.PENDENTE);
-        versoes.getFirst().alterarItem(item, Objects.requireNonNull(novosDados));
+        exigirItemDaEncomenda(Objects.requireNonNull(item));
+        item.alterar(Objects.requireNonNull(novosDados));
     }
 
-    public VersaoEncomenda aprovar(BigDecimal precoBruto, BigDecimal desconto, BigDecimal esforcoHoras,
+    public void aprovar(BigDecimal precoBruto, BigDecimal desconto, BigDecimal esforcoHoras,
                                    LocalDate prazoPrometido, Instant inicioPlanejadoEm, Instant limiteAlteracao,
                                    Usuario autor, Instant quando) {
         exigirStatus(StatusEncomenda.PENDENTE);
@@ -134,11 +172,10 @@ public class Encomenda {
         if (quando.isBefore(cadastradaEm)) {
             throw new IllegalArgumentException("A aprovação não pode anteceder o cadastro.");
         }
-        VersaoEncomenda versao = versoes.getFirst();
-        versao.definirPlanejamento(precoBruto, desconto, esforcoHoras, prazoPrometido, inicioPlanejadoEm, limiteAlteracao);
-        aprovarVersao(versao, autor, quando);
+        definirPlanejamento(precoBruto, desconto, esforcoHoras, prazoPrometido, inicioPlanejadoEm, limiteAlteracao);
+        aprovadaPor = autor;
+        aprovadaEm = quando;
         status = StatusEncomenda.APROVADA;
-        return versao;
     }
 
     public void reprovar(String justificativa) {
@@ -148,40 +185,68 @@ public class Encomenda {
     }
 
     public SolicitacaoAlteracao solicitarAlteracao(Usuario autor, CanalOrigem canal, Instant quando,
-                                                   BigDecimal precoBruto, BigDecimal desconto, BigDecimal esforcoHoras,
-                                                   LocalDate prazoPrometido, Instant inicioPlanejadoEm,
-                                                   Instant limiteAlteracao, List<ItemEncomenda> itensPropostos) {
+                                                  BigDecimal precoProposto, LocalDate prazoProposto,
+                                                  ItemEncomenda item, Integer quantidadeProposta,
+                                                  String personalizacaoProposta) {
         exigirStatus(StatusEncomenda.APROVADA);
-        VersaoEncomenda atual = getVersaoVigente();
         Objects.requireNonNull(quando);
-        if (quando.isBefore(atual.getAprovadaEm()) || quando.isAfter(atual.getLimiteAlteracao())) {
+        if (quando.isBefore(aprovadaEm) || quando.isAfter(limiteAlteracao)) {
             throw new IllegalStateException("A solicitação está fora do prazo de alteração.");
         }
-        VersaoEncomenda proposta = new VersaoEncomenda(this, List.copyOf(itensPropostos));
-        proposta.definirPlanejamento(precoBruto, desconto, esforcoHoras, prazoPrometido, inicioPlanejadoEm, limiteAlteracao);
-        SolicitacaoAlteracao solicitacao = new SolicitacaoAlteracao(this, atual, autor, canal, quando, proposta);
-        versoes.add(proposta);
+        if (item != null) {
+            exigirItemDaEncomenda(item);
+        }
+        SolicitacaoAlteracao solicitacao = new SolicitacaoAlteracao(this, autor, canal, quando,
+                precoProposto, prazoProposto, item, quantidadeProposta, personalizacaoProposta);
         solicitacoes.add(solicitacao);
         return solicitacao;
     }
 
-    public VersaoEncomenda aplicarAlteracao(SolicitacaoAlteracao solicitacao, Instant quando,
-                                            BigDecimal totalPago) {
+    public void aplicarAlteracao(SolicitacaoAlteracao solicitacao, Instant quando, BigDecimal totalPago) {
         exigirStatus(StatusEncomenda.APROVADA);
-        if (!mesmaEncomenda(solicitacao.getEncomenda())
-                || !getVersaoVigente().mesmaVersao(solicitacao.getVersaoBase())) {
-            throw new IllegalStateException("A solicitação não corresponde à versão vigente.");
+        if (!mesmaEncomenda(solicitacao.getEncomenda())) {
+            throw new IllegalArgumentException("A solicitação pertence a outra encomenda.");
         }
         solicitacao.exigirAplicavel(quando);
-        VersaoEncomenda proposta = solicitacao.getVersaoProposta();
-        if (proposta.precoTotal().compareTo(decimalNaoNegativo(totalPago, 2, "O total pago")) < 0) {
+        BigDecimal novoPreco = Objects.requireNonNullElse(solicitacao.getPrecoProposto(), precoTotal());
+        if (novoPreco.compareTo(decimalNaoNegativo(totalPago, 2, "O total pago")) < 0) {
             throw new IllegalStateException("Concilie os recebimentos antes de aplicar o novo preço.");
         }
-        aprovarVersao(proposta, solicitacao.getAnalisadaPor(), quando);
+
+        ItemEncomenda item = solicitacao.getItem();
+        String antes = descreverAlteracao(item);
+        precoBruto = novoPreco.add(desconto);
+        prazoPrometido = Objects.requireNonNullElse(solicitacao.getPrazoProposto(), prazoPrometido);
+        if (item != null) {
+            item.aplicarAlteracao(solicitacao.getQuantidadeProposta(), solicitacao.getPersonalizacaoProposta());
+        }
+        aprovadaPor = solicitacao.getAnalisadaPor();
+        aprovadaEm = quando;
+        numeroAlteracoes++;
         solicitacao.marcarAplicada();
+        cienciaPor = null;
+        cienciaEm = null;
         materiaisConferidosPor = null;
         materiaisConferidosEm = null;
-        return proposta;
+
+        historico.add(new HistoricoEncomenda(this, solicitacao.getAnalisadaPor(),
+                TipoEventoEncomenda.ALTERACAO_APROVADA, quando, antes, descreverAlteracao(item),
+                solicitacao.getJustificativa(), false));
+    }
+
+    private String descreverAlteracao(ItemEncomenda item) {
+        String dados = "Preço total: " + precoTotal().toPlainString() + "; prazo: " + prazoPrometido;
+        if (item == null) {
+            return dados;
+        }
+        return dados + "; item " + (item.getOrdem() + 1) + " (" + item.getTipoProduto() + ")"
+                + "; quantidade: " + item.getQuantidade() + "; personalização: " + item.getPersonalizacao();
+    }
+
+    private void exigirItemDaEncomenda(ItemEncomenda item) {
+        if (!mesmaEncomenda(item.getEncomenda())) {
+            throw new IllegalArgumentException("O item não pertence à encomenda.");
+        }
     }
 
     public ImpedimentoProducao registrarImpedimento(String descricao, Usuario responsavel, Instant quando) {
@@ -194,20 +259,22 @@ public class Encomenda {
     public void conferirMateriais(Usuario funcionario, Instant quando) {
         exigirStatus(StatusEncomenda.APROVADA);
         Objects.requireNonNull(quando);
-        if (quando.isBefore(getVersaoVigente().getAprovadaEm())) {
-            throw new IllegalArgumentException("Confira os materiais após a aprovação da versão.");
+        if (quando.isBefore(aprovadaEm)) {
+            throw new IllegalArgumentException("Confira os materiais após a aprovação da encomenda.");
         }
         materiaisConferidosPor = Objects.requireNonNull(funcionario);
         materiaisConferidosEm = quando;
     }
 
-    public void confirmarCiencia(VersaoEncomenda versao, Usuario funcionario, Instant quando) {
+    public void confirmarCiencia(int alteracoesConsultadas, Usuario funcionario, Instant quando) {
         exigirStatus(StatusEncomenda.APROVADA);
-        VersaoEncomenda vigente = getVersaoVigente();
-        if (!vigente.mesmaVersao(versao)) {
-            throw new IllegalStateException("A confirmação deve indicar a versão vigente.");
+        Objects.requireNonNull(funcionario, "Informe quem confirmou a leitura.");
+        Objects.requireNonNull(quando, "Informe quando a leitura foi confirmada.");
+        if (alteracoesConsultadas != numeroAlteracoes || quando.isBefore(aprovadaEm) || cienciaEm != null) {
+            throw new IllegalStateException("A ciência exige a especificação vigente da encomenda.");
         }
-        vigente.confirmarCiencia(funcionario, quando);
+        cienciaPor = funcionario;
+        cienciaEm = quando;
     }
 
     public void iniciarProducao(Instant quando) {
@@ -222,9 +289,8 @@ public class Encomenda {
         if (materiaisConferidosEm == null || quando.isBefore(materiaisConferidosEm)) {
             throw new IllegalStateException("Confira os materiais antes de iniciar a produção.");
         }
-        Instant cienciaEm = getVersaoVigente().getCienciaEm();
         if (cienciaEm == null || quando.isBefore(cienciaEm)) {
-            throw new IllegalStateException("Confirme a leitura da versão vigente antes de iniciar a produção.");
+            throw new IllegalStateException("Confirme a leitura da especificação vigente antes de iniciar a produção.");
         }
         status = StatusEncomenda.EM_PRODUCAO;
     }
@@ -259,23 +325,42 @@ public class Encomenda {
         return outra != null && (this == outra || (id != null && id.equals(outra.getId())));
     }
 
-    public VersaoEncomenda getVersaoVigente() {
-        if (numeroVersaoVigente == 0) {
-            return null;
-        }
-        return versoes.stream()
-                .filter(versao -> Objects.equals(versao.getNumero(), numeroVersaoVigente))
-                .findFirst().orElseThrow();
+    public BigDecimal precoTotal() {
+        return precoBruto == null ? null : precoBruto.subtract(desconto);
+    }
+
+    public int getNumeroAlteracoes() {
+        return numeroAlteracoes;
+    }
+
+    public List<HistoricoEncomenda> getHistorico() {
+        return List.copyOf(historico);
     }
 
     public Long getId() {
         return id;
     }
 
-    private void aprovarVersao(VersaoEncomenda versao, Usuario autor, Instant quando) {
-        int proximoNumero = numeroVersaoVigente + 1;
-        versao.aprovar(proximoNumero, autor, quando);
-        numeroVersaoVigente = proximoNumero;
+    private void definirPlanejamento(BigDecimal precoBruto, BigDecimal desconto, BigDecimal esforcoHoras,
+                             LocalDate prazoPrometido, Instant inicioPlanejadoEm, Instant limiteAlteracao) {
+        BigDecimal precoValidado = decimalNaoNegativo(precoBruto, 2, "O preço bruto");
+        BigDecimal descontoValidado = decimalNaoNegativo(desconto, 2, "O desconto");
+        BigDecimal esforcoValidado = decimalPositivo(esforcoHoras, 2, "O esforço");
+        Objects.requireNonNull(prazoPrometido, "Informe o prazo prometido.");
+        Objects.requireNonNull(inicioPlanejadoEm, "Informe o início planejado.");
+        Objects.requireNonNull(limiteAlteracao, "Informe o limite de alteração.");
+        if (descontoValidado.compareTo(precoValidado) > 0) {
+            throw new IllegalArgumentException("O desconto não pode superar o preço bruto.");
+        }
+        if (limiteAlteracao.isAfter(inicioPlanejadoEm)) {
+            throw new IllegalArgumentException("O limite de alteração não pode passar do início planejado.");
+        }
+        this.precoBruto = precoValidado;
+        this.desconto = descontoValidado;
+        this.esforcoHoras = esforcoValidado;
+        this.prazoPrometido = prazoPrometido;
+        this.inicioPlanejadoEm = inicioPlanejadoEm;
+        this.limiteAlteracao = limiteAlteracao;
     }
 
     private void exigirStatus(StatusEncomenda esperado) {
@@ -327,13 +412,48 @@ public class Encomenda {
         return motivoCancelamento;
     }
 
-    public List<ItemEncomenda> getItens() {
-        VersaoEncomenda vigente = getVersaoVigente();
-        return vigente == null ? versoes.getFirst().getItens() : vigente.getItens();
+    public BigDecimal getPrecoBruto() {
+        return precoBruto;
     }
 
-    public List<VersaoEncomenda> getVersoes() {
-        return List.copyOf(versoes);
+    public BigDecimal getDesconto() {
+        return desconto;
+    }
+
+    public BigDecimal getEsforcoHoras() {
+        return esforcoHoras;
+    }
+
+    public LocalDate getPrazoPrometido() {
+        return prazoPrometido;
+    }
+
+    public Instant getInicioPlanejadoEm() {
+        return inicioPlanejadoEm;
+    }
+
+    public Instant getLimiteAlteracao() {
+        return limiteAlteracao;
+    }
+
+    public Usuario getAprovadaPor() {
+        return aprovadaPor;
+    }
+
+    public Instant getAprovadaEm() {
+        return aprovadaEm;
+    }
+
+    public Usuario getCienciaPor() {
+        return cienciaPor;
+    }
+
+    public Instant getCienciaEm() {
+        return cienciaEm;
+    }
+
+    public List<ItemEncomenda> getItens() {
+        return List.copyOf(itens);
     }
 
     public List<SolicitacaoAlteracao> getSolicitacoes() {

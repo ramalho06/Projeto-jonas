@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EncomendaTest {
     private static final Instant CADASTRO = Instant.parse("2026-11-12T12:00:00Z");
@@ -72,36 +73,42 @@ class EncomendaTest {
     }
 
     @Test
-    void aplicaAlteracaoDePrecoAposConcordanciaEExigeCienciaDaNovaVersao() {
-        Encomenda encomenda = novaEncomenda();
-        VersaoEncomenda rascunho = encomenda.getVersoes().getFirst();
-        VersaoEncomenda original = encomenda.aprovar(new BigDecimal("100"), BigDecimal.ZERO, DUAS_HORAS, PRAZO,
-                INICIO_PLANEJADO, LIMITE_ALTERACAO, RESPONSAVEL, APROVACAO);
-        assertSame(rascunho, original);
-        encomenda.confirmarCiencia(original, RESPONSAVEL, APROVACAO);
-        SolicitacaoAlteracao solicitacao = encomenda.solicitarAlteracao(RESPONSAVEL, CanalOrigem.WHATSAPP, ALTERACAO,
-                new BigDecimal("120"), BigDecimal.ZERO, DUAS_HORAS, PRAZO,
-                INICIO_PLANEJADO, LIMITE_ALTERACAO, List.of(item("Nome em azul")));
-        assertNull(solicitacao.getVersaoProposta().getNumero());
-        assertSame(original, encomenda.getVersaoVigente());
+    void aplicaAlteracaoAposConcordanciaRegistraHistoricoEExigeNovaCiencia() {
+        Encomenda encomenda = encomendaAprovada();
+        ItemEncomenda item = encomenda.getItens().getFirst();
+        encomenda.confirmarCiencia(0, RESPONSAVEL, APROVACAO);
+        SolicitacaoAlteracao solicitacao = encomenda.solicitarAlteracao(RESPONSAVEL, CanalOrigem.WHATSAPP,
+                ALTERACAO, new BigDecimal("120"), null, item, 12, "Nome em azul");
         solicitacao.autorizar(RESPONSAVEL, "Personalização atualizada", ALTERACAO);
 
         assertThrows(IllegalStateException.class,
                 () -> encomenda.aplicarAlteracao(solicitacao, ALTERACAO, BigDecimal.ZERO));
-        assertSame(original, encomenda.getVersaoVigente());
+        assertEquals(new BigDecimal("100.00"), encomenda.precoTotal());
+        assertEquals("Nome da cliente em dourado", item.getPersonalizacao());
+        assertTrue(encomenda.getHistorico().isEmpty());
 
         solicitacao.confirmarConcordancia(ALTERACAO);
-        VersaoEncomenda atual = encomenda.aplicarAlteracao(solicitacao, ALTERACAO, BigDecimal.ZERO);
-        assertSame(solicitacao.getVersaoProposta(), atual);
-        assertEquals(2, atual.getNumero());
-        assertEquals(2, encomenda.getVersoes().size());
-        assertEquals("Nome da cliente em dourado", original.getItens().getFirst().getPersonalizacao());
-        assertEquals("Nome em azul", atual.getItens().getFirst().getPersonalizacao());
+        encomenda.aplicarAlteracao(solicitacao, ALTERACAO, BigDecimal.ZERO);
+
+        assertSame(item, encomenda.getItens().getFirst());
+        assertEquals(12, item.getQuantidade());
+        assertEquals("Nome em azul", item.getPersonalizacao());
+        assertEquals(new BigDecimal("120.00"), encomenda.precoTotal());
+        assertEquals(PRAZO, encomenda.getPrazoPrometido());
+        assertEquals(StatusSolicitacaoAlteracao.APLICADA, solicitacao.getStatus());
+        HistoricoEncomenda registro = encomenda.getHistorico().getFirst();
+        assertEquals(TipoEventoEncomenda.ALTERACAO_APROVADA, registro.getOperacao());
+        assertSame(RESPONSAVEL, registro.getAutor());
+        assertTrue(registro.getDadosAnteriores().contains("100.00"));
+        assertTrue(registro.getDadosAnteriores().contains("dourado"));
+        assertTrue(registro.getDadosNovos().contains("120.00"));
+        assertTrue(registro.getDadosNovos().contains("azul"));
+
         encomenda.conferirMateriais(RESPONSAVEL, ALTERACAO);
         assertThrows(IllegalStateException.class, () -> encomenda.iniciarProducao(ALTERACAO));
-        assertThrows(IllegalStateException.class, () -> encomenda.confirmarCiencia(original, RESPONSAVEL, ALTERACAO));
+        assertThrows(IllegalStateException.class, () -> encomenda.confirmarCiencia(0, RESPONSAVEL, ALTERACAO));
 
-        encomenda.confirmarCiencia(atual, RESPONSAVEL, ALTERACAO);
+        encomenda.confirmarCiencia(1, RESPONSAVEL, ALTERACAO);
         encomenda.iniciarProducao(ALTERACAO);
         assertEquals(StatusEncomenda.EM_PRODUCAO, encomenda.getStatus());
 
@@ -124,7 +131,7 @@ class EncomendaTest {
                 encomenda.aprovar(new BigDecimal("100"), BigDecimal.ZERO, DUAS_HORAS, PRAZO,
                         INICIO_PLANEJADO, INICIO_PLANEJADO.plusSeconds(1), RESPONSAVEL, APROVACAO));
         assertEquals(StatusEncomenda.PENDENTE, encomenda.getStatus());
-        assertNull(encomenda.getVersaoVigente());
+        assertNull(encomenda.getAprovadaEm());
     }
 
     @Test
@@ -153,6 +160,47 @@ class EncomendaTest {
         assertEquals("Lançamento incorreto", pagamento.getJustificativaEstorno());
         assertThrows(IllegalStateException.class,
                 () -> pagamento.estornar(RESPONSAVEL, "Segunda tentativa", ALTERACAO));
+    }
+
+    @Test
+    void registraRecusaSemMudarEncomenda() {
+        Encomenda encomenda = encomendaAprovada();
+        SolicitacaoAlteracao solicitacao = encomenda.solicitarAlteracao(RESPONSAVEL, CanalOrigem.TELEFONE,
+                ALTERACAO, null, PRAZO.plusDays(1), null, null, null);
+
+        solicitacao.rejeitar(RESPONSAVEL, "Prazo indisponível", ALTERACAO);
+
+        assertEquals(StatusSolicitacaoAlteracao.REJEITADA, solicitacao.getStatus());
+        assertEquals("Prazo indisponível", solicitacao.getJustificativa());
+        assertSame(RESPONSAVEL, solicitacao.getAnalisadaPor());
+        assertEquals(PRAZO, encomenda.getPrazoPrometido());
+        assertThrows(IllegalStateException.class,
+                () -> encomenda.aplicarAlteracao(solicitacao, ALTERACAO, BigDecimal.ZERO));
+    }
+
+    @Test
+    void impedeAplicacaoDePedidoDeAlteracaoDesatualizado() {
+        Encomenda encomenda = encomendaAprovada();
+        ItemEncomenda item = encomenda.getItens().getFirst();
+        SolicitacaoAlteracao primeira = encomenda.solicitarAlteracao(RESPONSAVEL, CanalOrigem.TELEFONE, ALTERACAO,
+                null, null, item, 11, null);
+        SolicitacaoAlteracao segunda = encomenda.solicitarAlteracao(RESPONSAVEL, CanalOrigem.TELEFONE, ALTERACAO,
+                null, null, item, 13, null);
+        primeira.autorizar(RESPONSAVEL, "Aceita", ALTERACAO);
+        segunda.autorizar(RESPONSAVEL, "Aceita", ALTERACAO);
+        encomenda.aplicarAlteracao(primeira, ALTERACAO, BigDecimal.ZERO);
+
+        assertThrows(IllegalStateException.class,
+                () -> encomenda.aplicarAlteracao(segunda, ALTERACAO, BigDecimal.ZERO));
+        assertEquals(11, item.getQuantidade());
+        assertEquals(1, encomenda.getHistorico().size());
+    }
+
+    private Encomenda encomendaAprovada() {
+        Encomenda encomenda = novaEncomenda();
+        encomenda.aprovar(new BigDecimal("100"), BigDecimal.ZERO, DUAS_HORAS, PRAZO,
+                INICIO_PLANEJADO, LIMITE_ALTERACAO, RESPONSAVEL, APROVACAO);
+        return encomenda;
     }
 
     private Encomenda novaEncomenda() {

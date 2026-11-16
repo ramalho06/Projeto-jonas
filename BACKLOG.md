@@ -8,6 +8,8 @@ Plano individual de 14 dias com prioridade para o backend Spring Boot. Usa os RF
 - O RF09 de notificações sai do escopo. A consulta dos acontecimentos fica no histórico do pedido, conforme a visibilidade de cada perfil.
 - O RF11 mantém os recebimentos, inclusive parciais, e o saldo em aberto. O cadastro de parcelas futuras e seus vencimentos sai do escopo.
 
+- A encomenda guarda a especificação vigente. Cada solicitação propõe um novo preço, prazo ou alteração de quantidade e personalização de um item. O antes e o depois ficam no histórico.
+
 ## Como usar o quadro
 
 - Crie um card por seção e mantenha as subtasks como checklist. Use as colunas Pendente, Em andamento, Em verificação e Concluído.
@@ -19,7 +21,7 @@ Plano individual de 14 dias com prioridade para o backend Spring Boot. Usa os RF
 | Janela | Foco | Marco verificável |
 | --- | --- | --- |
 | Dias 1–4 | Base, acesso, pedidos e aprovação | Criar, consultar e aprovar um pedido com planejamento no PostgreSQL. |
-| Dias 5–9 | Alterações, produção, pagamentos e entrega | Alterar um pedido, confirmar a versão, produzir, quitar e entregar. |
+| Dias 5–9 | Alterações, produção, pagamentos e entrega | Alterar um pedido, confirmar a especificação, produzir, quitar e entregar. |
 | Dias 10–12 | Portal, materiais, compras, indicadores e custos | Exercitar todos os módulos pela API, do pedido ao resultado estimado. |
 | Dias 13–14 | Verificação, documentação e correções | Repetir a demonstração e os testes a partir da configuração descrita no README. |
 
@@ -38,10 +40,10 @@ Plano individual de 14 dias com prioridade para o backend Spring Boot. Usa os RF
 
 **Dia 1 · RN02–RN08**
 
-- [ ] Registrar as decisões validadas e as hipóteses ainda pendentes sobre início da produção, prazo para solicitação e expiração, ciência da versão, sinal, entrega e exceções.
+- [ ] Registrar as decisões validadas e as hipóteses ainda pendentes sobre início da produção, prazo para solicitação e expiração, ciência da especificação, sinal, entrega e exceções.
 - [ ] Confirmar como serão registrados o esforço em horas, a concordância do cliente, as correções de pagamento e as perdas no cancelamento.
 - [ ] Combinar a matriz de permissões e quais dados o cliente pode ver. Confirmar se fotos ou artes são necessárias à fabricação.
-- [ ] Combinar os campos e estados compartilhados de pedido, versão, pagamento, material e reserva de estoque, além do fuso para interpretar prazos operacionais.
+- [ ] Combinar os campos e estados compartilhados de pedido, solicitação, pagamento, material e reserva de estoque, além do fuso para interpretar prazos operacionais.
 
 **Aceite.** As regras registradas descrevem as transições, quem pode executá-las e o que acontece quando uma operação é bloqueada. Cada decisão pendente tem uma hipótese registrada para orientar a implementação.
 
@@ -73,7 +75,7 @@ Plano individual de 14 dias com prioridade para o backend Spring Boot. Usa os RF
 
 - [ ] Registrar o prazo prometido, o início planejado, o esforço estimado e o limite para alterações.
 - [ ] Exigir preço e planejamento válido para aprovar. O limite de alteração pode ir até o início planejado da produção.
-- [ ] Expor a aprovação na API e testar as validações e a criação da primeira versão aprovada.
+- [ ] Expor a aprovação na API e testar as validações e o registro da especificação aprovada.
 
 **Aceite.** Um pedido com preço e planejamento válidos é aprovado. Um limite de alteração posterior ao início planejado impede a aprovação.
 
@@ -83,7 +85,7 @@ Plano individual de 14 dias com prioridade para o backend Spring Boot. Usa os RF
 
 - [ ] Implementar as transições permitidas e seus responsáveis. Integrar reprovação, cancelamento e entrega às operações correspondentes.
 - [ ] Registrar e resolver impedimentos, com motivo e responsável. Exibir o bloqueio na ficha.
-- [ ] Registrar a conferência manual de materiais e, ao iniciar produção, verificar status aprovado, impedimentos, solicitações em aberto e ciência da versão vigente.
+- [ ] Registrar a conferência manual de materiais e, ao iniciar produção, verificar status aprovado, impedimentos, solicitações em aberto e ciência da especificação vigente.
 - [ ] Expor as ações de produção na API. Testar transição inválida e início com impedimento ou sem conferência.
 
 **Aceite.** Um pedido impedido exibe o motivo e fica bloqueado para início da produção. Depois de resolver o impedimento, a produção só começa com as demais verificações satisfeitas.
@@ -97,29 +99,29 @@ Plano individual de 14 dias com prioridade para o backend Spring Boot. Usa os RF
 - [ ] Aplicar a regra de prazo e expiração decidida no card 02. Uma solicitação aberta bloqueia o início da produção enquanto estiver válida.
 - [ ] Expor a criação e a consulta de solicitações na API. Impedir alterações diretas de campos protegidos de pedidos aprovados.
 
-**Aceite.** Uma solicitação válida fica pendente e preserva a especificação vigente. Uma tentativa fora do prazo retorna o motivo do bloqueio. Uma solicitação expirada preserva a versão anterior e tem sua expiração registrada no histórico.
+**Aceite.** Uma solicitação válida fica pendente e preserva a especificação vigente. Uma tentativa fora do prazo retorna o motivo do bloqueio. Uma solicitação expirada preserva os dados vigentes e tem sua expiração registrada no histórico.
 
 ## 08 Aprovar alterações e registrar histórico
 
 **Dias 6–7 · RF06, RF08, RN04, RN06, RN07, RNF02 e RNF03 · Depende de 05 e 07 · Integrar saldo com 10**
 
 - [ ] Implementar análise de impacto em esforço, materiais, preço e prazo, com decisão justificada. Registrar concordância do cliente antes de aplicar novo preço ou prazo.
-- [ ] Validar a versão vigente e o total pago na aplicação. Se o novo preço ficar abaixo do valor recebido, exigir conciliação conforme a regra validada.
-- [ ] Aplicar a versão e gravar o histórico de forma atômica. Detectar tentativa de aplicar uma solicitação baseada em versão desatualizada.
+- [ ] Validar se a solicitação está atualizada e conferir o total pago na aplicação. Se o novo preço ficar abaixo do valor recebido, exigir conciliação conforme a regra validada.
+- [ ] Atualizar a encomenda e gravar o antes e o depois de forma atômica. Detectar solicitações abertas antes de outra alteração aplicada.
 - [ ] Registrar autor, data, operação e valores anterior e novo nos eventos do pedido. Exibir o histórico na ficha, sem ações de edição ou exclusão, e filtrar os eventos visíveis ao cliente.
-- [ ] Expor as ações de análise na API e testar aprovação, rejeição, versão desatualizada e falha com reversão da operação.
+- [ ] Expor as ações de análise na API e testar aprovação, rejeição, solicitação desatualizada e falha com reversão da operação.
 
-**Aceite.** A versão só muda quando as condições são satisfeitas. Se a validação falhar, a versão anterior continua vigente e o histórico não registra a alteração como aplicada.
+**Aceite.** A encomenda só muda quando as condições são satisfeitas. Se a validação falhar, os dados vigentes são preservados e o histórico não registra a alteração como aplicada.
 
-## 09 Confirmar ciência da versão vigente
+## 09 Confirmar ciência da especificação vigente
 
 **Dia 7 · RF10 e RN05 · Depende de 06 e 08**
 
-- [ ] Registrar ciência com funcionário, versão e data.
-- [ ] Integrar a validação à transição para produção. Exigir nova confirmação quando uma alteração gerar outra versão.
-- [ ] Incluir a versão aprovada na ficha consultada pela API e expor a ação de confirmar. Testar o bloqueio com ciência de versão anterior.
+- [ ] Registrar ciência com funcionário, contador de alterações consultado e data.
+- [ ] Integrar a validação à transição para produção. Exigir nova confirmação depois de aplicar uma alteração.
+- [ ] Expor os dados aprovados e o contador de alterações na API. Testar o bloqueio quando o funcionário consultou dados anteriores.
 
-**Aceite.** Após a aprovação de uma nova versão, a ciência anterior continua consultável, mas não permite iniciar o trabalho. A confirmação da versão atual satisfaz esse requisito da transição.
+**Aceite.** Após aplicar uma alteração, a ciência é reiniciada. A produção só começa após a confirmação da especificação atual.
 
 ## 10 Registrar recebimentos e calcular saldo
 
@@ -222,7 +224,7 @@ Plano individual de 14 dias com prioridade para o backend Spring Boot. Usa os RF
 
 - [ ] Preparar dados e contas de demonstração para administrador, atendimento, produção, financeiro e cliente.
 - [ ] Executar o roteiro completo com a mesma encomenda sempre que possível. Cobrir pedido, aprovação, alteração, ciência, impedimento, estoque, compra, pagamentos, entrega, custos e resultado.
-- [ ] Ensaiar os bloqueios de maior valor para a apresentação. Usar versão antiga, prazo de alteração inválido, acesso de outro cliente e tentativa de entrega com saldo.
+- [ ] Ensaiar os bloqueios de maior valor para a apresentação. Usar uma solicitação desatualizada, prazo de alteração inválido, acesso de outro cliente e tentativa de entrega com saldo.
 - [ ] Conferir os requisitos vigentes no quadro e repetir a execução partindo de banco vazio conforme o README.
 
 **Aceite.** O README permite rodar o sistema e repetir a demonstração pela API. A entrega completa inclui a repetição pelas telas e o aceite dos RFs e RNFs vigentes.

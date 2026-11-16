@@ -20,8 +20,19 @@ classDiagram
         -StatusEncomenda status
         -String motivoReprovacao
         -String motivoCancelamento
-        -List~VersaoEncomenda~ versoes
-        -int numeroVersaoVigente
+        -BigDecimal precoBruto
+        -BigDecimal desconto
+        -BigDecimal esforcoHoras
+        -LocalDate prazoPrometido
+        -Instant inicioPlanejadoEm
+        -Instant limiteAlteracao
+        -Usuario aprovadaPor
+        -Instant aprovadaEm
+        -Usuario cienciaPor
+        -Instant cienciaEm
+        -List~ItemEncomenda~ itens
+        -int numeroAlteracoes
+        -List~HistoricoEncomenda~ historico
         -List~SolicitacaoAlteracao~ solicitacoes
         -List~ImpedimentoProducao~ impedimentos
         -Usuario materiaisConferidosPor
@@ -32,17 +43,18 @@ classDiagram
         -long revisao
         +adicionarItem(ItemEncomenda item) void
         +alterarItem(ItemEncomenda item, ItemEncomenda novosDados) void
-        +aprovar(BigDecimal precoBruto, BigDecimal desconto, BigDecimal esforcoHoras, LocalDate prazoPrometido, Instant inicioPlanejadoEm, Instant limiteAlteracao, Usuario autor, Instant quando) VersaoEncomenda
+        +aprovar(BigDecimal precoBruto, BigDecimal desconto, BigDecimal esforcoHoras, LocalDate prazoPrometido, Instant inicioPlanejadoEm, Instant limiteAlteracao, Usuario autor, Instant quando) void
         +reprovar(String justificativa) void
-        +solicitarAlteracao(Usuario autor, CanalOrigem canal, Instant quando, BigDecimal precoBruto, BigDecimal desconto, BigDecimal esforcoHoras, LocalDate prazoPrometido, Instant inicioPlanejadoEm, Instant limiteAlteracao, List~ItemEncomenda~ itensPropostos) SolicitacaoAlteracao
-        +aplicarAlteracao(SolicitacaoAlteracao solicitacao, Instant quando, BigDecimal totalPago) VersaoEncomenda
+        +solicitarAlteracao(Usuario autor, CanalOrigem canal, Instant quando, BigDecimal precoProposto, LocalDate prazoProposto, ItemEncomenda item, Integer quantidadeProposta, String personalizacaoProposta) SolicitacaoAlteracao
+        +aplicarAlteracao(SolicitacaoAlteracao solicitacao, Instant quando, BigDecimal totalPago) void
         +registrarImpedimento(String descricao, Usuario responsavel, Instant quando) ImpedimentoProducao
         +conferirMateriais(Usuario funcionario, Instant quando) void
-        +confirmarCiencia(VersaoEncomenda versao, Usuario funcionario, Instant quando) void
+        +confirmarCiencia(int alteracoesConsultadas, Usuario funcionario, Instant quando) void
         +iniciarProducao(Instant quando) void
         +marcarPronta() void
         +registrarEntrega(Usuario autor, Instant quando, ModalidadeEntrega modalidade, BigDecimal saldoEmAberto) void
         +cancelar(String justificativa) void
+        +precoTotal() BigDecimal
     }
 
     class Cliente {
@@ -73,13 +85,14 @@ classDiagram
     class ItemEncomenda {
         <<entity>>
         -Long id
-        -VersaoEncomenda versao
+        -Encomenda encomenda
         -int ordem
         -String tipoProduto
         -int quantidade
         -String personalizacao
         -List~MaterialNecessario~ materiais
         ~alterar(ItemEncomenda novosDados) void
+        ~aplicarAlteracao(Integer novaQuantidade, String novaPersonalizacao) void
     }
 
     class PerfilUsuario {
@@ -117,10 +130,11 @@ classDiagram
         CANCELADA
     }
 
+    Encomenda "1" *-- "1..*" ItemEncomenda : itens do pedido
     Encomenda "0..*" --> "1" Cliente : pertence a
     Encomenda "0..*" --> "1" Usuario : responsável
+    Encomenda "0..*" --> "0..1" Usuario : aprovação
     Cliente "0..1" --> "0..1" Usuario : conta do portal
-    VersaoEncomenda "1" *-- "1..*" ItemEncomenda : itens da versão
 
     Encomenda ..> StatusEncomenda
     Encomenda ..> CanalOrigem
@@ -129,45 +143,26 @@ classDiagram
 
 ```
 
-## Versões, alterações e histórico
+## Alterações e histórico
 
 ```mermaid
 classDiagram
     direction TB
 
-    class VersaoEncomenda {
-        <<entity>>
-        -Long id
-        -Encomenda encomenda
-        -Integer numero
-        -BigDecimal precoBruto
-        -BigDecimal desconto
-        -BigDecimal esforcoHoras
-        -LocalDate prazoPrometido
-        -Instant inicioPlanejadoEm
-        -Instant limiteAlteracao
-        -Usuario aprovadaPor
-        -Instant aprovadaEm
-        -Usuario cienciaPor
-        -Instant cienciaEm
-        -List~ItemEncomenda~ itens
-        ~adicionarItem(ItemEncomenda item) void
-        ~alterarItem(ItemEncomenda item, ItemEncomenda novosDados) void
-        ~definirPlanejamento(BigDecimal precoBruto, BigDecimal desconto, BigDecimal esforcoHoras, LocalDate prazoPrometido, Instant inicioPlanejadoEm, Instant limiteAlteracao) void
-        ~aprovar(int numero, Usuario autor, Instant quando) void
-        ~confirmarCiencia(Usuario funcionario, Instant quando) void
-        +precoTotal() BigDecimal
-    }
-
     class SolicitacaoAlteracao {
         <<entity>>
         -Long id
         -Encomenda encomenda
-        -VersaoEncomenda versaoBase
+        -int alteracoesNaSolicitacao
         -Usuario registradaPor
         -CanalOrigem canal
         -Instant solicitadaEm
-        -VersaoEncomenda versaoProposta
+        -BigDecimal precoProposto
+        -LocalDate prazoProposto
+        -ItemEncomenda item
+        -Integer quantidadeProposta
+        -String personalizacaoProposta
+        -long revisao
         -StatusSolicitacaoAlteracao status
         -Usuario analisadaPor
         -Instant analisadaEm
@@ -221,15 +216,12 @@ classDiagram
         ENTREGUE
     }
 
-    Encomenda "1" *-- "1..*" VersaoEncomenda : rascunho, propostas e versões aprovadas
     Encomenda "1" *-- "0..*" SolicitacaoAlteracao : solicitações
 
-    SolicitacaoAlteracao "0..*" --> "1" VersaoEncomenda : versão base
-    SolicitacaoAlteracao "0..1" --> "1" VersaoEncomenda : versão proposta
-    VersaoEncomenda "0..*" --> "0..1" Usuario : aprovação
     SolicitacaoAlteracao "0..*" --> "1" Usuario : registro
     SolicitacaoAlteracao "0..*" --> "0..1" Usuario : análise
-    HistoricoEncomenda "0..*" --> "1" Encomenda : evento da encomenda
+    Encomenda "1" *-- "0..*" HistoricoEncomenda : eventos
+    SolicitacaoAlteracao "0..*" --> "0..1" ItemEncomenda : item da mudança
     HistoricoEncomenda "0..*" --> "0..1" Usuario : autor
     SolicitacaoAlteracao ..> StatusSolicitacaoAlteracao
     SolicitacaoAlteracao ..> CanalOrigem
@@ -264,8 +256,8 @@ classDiagram
     Encomenda "1" *-- "0..*" ImpedimentoProducao : impedimentos
     ImpedimentoProducao "0..*" --> "1" Usuario : responsável
     Encomenda "0..*" --> "0..1" Usuario : conferência de materiais
-    VersaoEncomenda "0..*" --> "0..1" Usuario : ciência da produção
     Encomenda "0..*" --> "0..1" Usuario : registro da entrega
+    Encomenda "0..*" --> "0..1" Usuario : ciência da produção
     Encomenda ..> ModalidadeEntrega
 
 ```
@@ -399,8 +391,9 @@ classDiagram
 
 ## Decisões de modelagem
 
-- A `Encomenda` começa com uma versão em rascunho. Cada `ItemEncomenda` pertence a uma versão. A solicitação aponta para a versão base e para uma proposta, que recebe número e passa a vigorar ao ser aprovada.
-- Cada versão guarda uma confirmação de ciência, com funcionário e data. A encomenda guarda a modalidade, o funcionário e a data da entrega.
+- A `Encomenda` guarda os itens, o preço e o prazo vigentes. A solicitação guarda somente o preço, o prazo ou a mudança de quantidade e personalização de um item existente.
+- Aplicar uma solicitação autorizada atualiza a encomenda e registra os dados anteriores e novos no histórico. O contador de alterações identifica solicitações e confirmações desatualizadas.
+- A encomenda guarda quem confirmou a ciência e quando, além da modalidade, do funcionário e da data da entrega.
 - O cliente pode existir sem conta no portal. Os funcionários podem acumular funções operacionais. O histórico admite eventos automáticos sem autor humano.
 - Cada pagamento admite um estorno integral, com responsável, data e justificativa no próprio pagamento. A disponibilidade de material deriva dos saldos físico e reservado.
 - A lista de compras, os indicadores e o resultado estimado são consultas sobre os dados persistidos. Arquivos de arte ainda dependem de validação com o proprietário.

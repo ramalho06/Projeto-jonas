@@ -2,7 +2,6 @@ package com.example.jonas_project.encomendas.dominio;
 
 import com.example.jonas_project.acesso.dominio.Usuario;
 
-import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -13,12 +12,15 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Objects;
 
+import static com.example.jonas_project.compartilhado.dominio.ValidacaoDominio.decimalNaoNegativo;
 import static com.example.jonas_project.compartilhado.dominio.ValidacaoDominio.texto;
 
 @Entity
@@ -32,9 +34,8 @@ public class SolicitacaoAlteracao {
     @JoinColumn(name = "encomenda_id", nullable = false)
     private Encomenda encomenda;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false, cascade = CascadeType.PERSIST)
-    @JoinColumn(name = "versao_base_id", nullable = false)
-    private VersaoEncomenda versaoBase;
+    @Column(name = "alteracoes_na_solicitacao", nullable = false)
+    private int alteracoesNaSolicitacao;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "registrada_por_id", nullable = false)
@@ -47,9 +48,24 @@ public class SolicitacaoAlteracao {
     @Column(name = "solicitada_em", nullable = false)
     private Instant solicitadaEm;
 
-    @OneToOne(fetch = FetchType.LAZY, optional = false, cascade = CascadeType.PERSIST)
-    @JoinColumn(name = "versao_proposta_id", nullable = false, unique = true)
-    private VersaoEncomenda versaoProposta;
+    @Column(name = "preco_proposto", precision = 15, scale = 2)
+    private BigDecimal precoProposto;
+
+    @Column(name = "prazo_proposto")
+    private LocalDate prazoProposto;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "item_id")
+    private ItemEncomenda item;
+
+    @Column(name = "quantidade_proposta")
+    private Integer quantidadeProposta;
+
+    @Column(name = "personalizacao_proposta", columnDefinition = "text")
+    private String personalizacaoProposta;
+
+    @Version
+    private long revisao;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -71,21 +87,39 @@ public class SolicitacaoAlteracao {
     protected SolicitacaoAlteracao() {
     }
 
-    SolicitacaoAlteracao(Encomenda encomenda, VersaoEncomenda versaoBase, Usuario registradaPor,
-                         CanalOrigem canal, Instant solicitadaEm, VersaoEncomenda versaoProposta) {
+    SolicitacaoAlteracao(Encomenda encomenda, Usuario registradaPor, CanalOrigem canal, Instant solicitadaEm,
+                         BigDecimal precoProposto, LocalDate prazoProposto, ItemEncomenda item,
+                         Integer quantidadeProposta, String personalizacaoProposta) {
         this.encomenda = encomenda;
-        this.versaoBase = versaoBase;
+        this.alteracoesNaSolicitacao = encomenda.getNumeroAlteracoes();
         this.registradaPor = Objects.requireNonNull(registradaPor);
         this.canal = Objects.requireNonNull(canal);
         this.solicitadaEm = Objects.requireNonNull(solicitadaEm);
-        this.versaoProposta = versaoProposta;
+        boolean alteraItem = quantidadeProposta != null || personalizacaoProposta != null;
+        if ((item != null) != alteraItem) {
+            throw new IllegalArgumentException("Informe o item e a quantidade ou personalização proposta.");
+        }
+        if (quantidadeProposta != null && quantidadeProposta <= 0) {
+            throw new IllegalArgumentException("A quantidade proposta deve ser positiva.");
+        }
+
+        this.precoProposto = precoProposto == null ? null : decimalNaoNegativo(precoProposto, 2, "O preço proposto");
+        this.prazoProposto = prazoProposto;
+        this.item = item;
+        this.quantidadeProposta = quantidadeProposta;
+        this.personalizacaoProposta = personalizacaoProposta == null ? null : texto(personalizacaoProposta, "a personalização");
+        boolean mudouQuantidade = quantidadeProposta != null && quantidadeProposta != item.getQuantidade();
+        boolean mudouPersonalizacao = this.personalizacaoProposta != null
+                && !this.personalizacaoProposta.equals(item.getPersonalizacao());
+        if (!alteraCondicoesComerciais() && !mudouQuantidade && !mudouPersonalizacao) {
+            throw new IllegalArgumentException("Informe pelo menos uma alteração.");
+        }
     }
 
     public void autorizar(Usuario analista, String motivo, Instant quando) {
+        exigirEspecificacaoAtual();
         registrarAnalise(analista, motivo, quando);
-        boolean exigeConcordancia = versaoBase.precoTotal().compareTo(versaoProposta.precoTotal()) != 0
-                || !versaoBase.getPrazoPrometido().equals(versaoProposta.getPrazoPrometido());
-        status = exigeConcordancia ? StatusSolicitacaoAlteracao.AGUARDANDO_CONCORDANCIA
+        status = alteraCondicoesComerciais() ? StatusSolicitacaoAlteracao.AGUARDANDO_CONCORDANCIA
                 : StatusSolicitacaoAlteracao.AUTORIZADA;
     }
 
@@ -95,6 +129,7 @@ public class SolicitacaoAlteracao {
     }
 
     public void confirmarConcordancia(Instant quando) {
+        exigirEspecificacaoAtual();
         exigirPrazo(Objects.requireNonNull(quando));
         if (status != StatusSolicitacaoAlteracao.AGUARDANDO_CONCORDANCIA || quando.isBefore(analisadaEm)) {
             throw new IllegalStateException("A solicitação não pode receber concordância nesse momento.");
@@ -105,7 +140,9 @@ public class SolicitacaoAlteracao {
 
     public void expirar(Instant quando) {
         Objects.requireNonNull(quando);
-        if (!estaEmAberto() || !quando.isAfter(versaoBase.getLimiteAlteracao())) {
+        if (!estaEmAberto() || quando.isBefore(solicitadaEm)
+                || (alteracoesNaSolicitacao == encomenda.getNumeroAlteracoes()
+                && !quando.isAfter(encomenda.getLimiteAlteracao()))) {
             throw new IllegalStateException("A solicitação ainda não pode expirar.");
         }
         status = StatusSolicitacaoAlteracao.EXPIRADA;
@@ -119,6 +156,7 @@ public class SolicitacaoAlteracao {
     }
 
     void exigirAplicavel(Instant quando) {
+        exigirEspecificacaoAtual();
         exigirPrazo(Objects.requireNonNull(quando));
         Instant autorizadaEm = concordanciaEm == null ? analisadaEm : concordanciaEm;
         if (status != StatusSolicitacaoAlteracao.AUTORIZADA || quando.isBefore(autorizadaEm)) {
@@ -143,7 +181,7 @@ public class SolicitacaoAlteracao {
     }
 
     private void exigirPrazo(Instant quando) {
-        if (quando.isAfter(versaoBase.getLimiteAlteracao())) {
+        if (quando.isAfter(encomenda.getLimiteAlteracao())) {
             throw new IllegalStateException("O limite para alterações foi atingido.");
         }
     }
@@ -156,8 +194,16 @@ public class SolicitacaoAlteracao {
         return encomenda;
     }
 
-    public VersaoEncomenda getVersaoBase() {
-        return versaoBase;
+    private boolean alteraCondicoesComerciais() {
+        return (precoProposto != null && precoProposto.compareTo(encomenda.precoTotal()) != 0)
+                || (prazoProposto != null && !prazoProposto.equals(encomenda.getPrazoPrometido()));
+    }
+
+    private void exigirEspecificacaoAtual() {
+        if (encomenda.getStatus() != StatusEncomenda.APROVADA
+                || alteracoesNaSolicitacao != encomenda.getNumeroAlteracoes()) {
+            throw new IllegalStateException("A solicitação não corresponde à especificação vigente.");
+        }
     }
 
     public Usuario getRegistradaPor() {
@@ -172,8 +218,24 @@ public class SolicitacaoAlteracao {
         return solicitadaEm;
     }
 
-    public VersaoEncomenda getVersaoProposta() {
-        return versaoProposta;
+    public BigDecimal getPrecoProposto() {
+        return precoProposto;
+    }
+
+    public LocalDate getPrazoProposto() {
+        return prazoProposto;
+    }
+
+    public ItemEncomenda getItem() {
+        return item;
+    }
+
+    public Integer getQuantidadeProposta() {
+        return quantidadeProposta;
+    }
+
+    public String getPersonalizacaoProposta() {
+        return personalizacaoProposta;
     }
 
     public StatusSolicitacaoAlteracao getStatus() {

@@ -27,8 +27,8 @@ public class ItemEncomenda {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "versao_id", nullable = false)
-    private VersaoEncomenda versao;
+    @JoinColumn(name = "encomenda_id", nullable = false)
+    private Encomenda encomenda;
 
     @Column(nullable = false)
     private int ordem;
@@ -60,9 +60,9 @@ public class ItemEncomenda {
         this.materiais.addAll(copiarMateriais(materiais));
     }
 
-    ItemEncomenda copiarPara(VersaoEncomenda versao, int ordem) {
+    ItemEncomenda copiarPara(Encomenda encomenda, int ordem) {
         ItemEncomenda copia = new ItemEncomenda(getTipoProduto(), getQuantidade(), getPersonalizacao(), getMateriais());
-        copia.versao = versao;
+        copia.encomenda = encomenda;
         copia.ordem = ordem;
         return copia;
     }
@@ -77,6 +77,23 @@ public class ItemEncomenda {
         personalizacao = novaPersonalizacao;
         materiais.clear();
         materiais.addAll(novosMateriais);
+    }
+
+    void aplicarAlteracao(Integer novaQuantidade, String novaPersonalizacao) {
+        if (novaQuantidade != null) {
+            quantidade = novaQuantidade;
+        }
+        if (novaPersonalizacao != null) {
+            personalizacao = novaPersonalizacao;
+        }
+    }
+
+    public Encomenda getEncomenda() {
+        return encomenda;
+    }
+
+    public int getOrdem() {
+        return ordem;
     }
 
     private static List<MaterialNecessario> copiarMateriais(List<MaterialNecessario> materiais) {
