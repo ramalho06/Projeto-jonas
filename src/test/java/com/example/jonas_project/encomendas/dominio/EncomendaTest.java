@@ -36,10 +36,15 @@ class EncomendaTest {
         assertEquals(StatusEncomenda.PENDENTE, encomenda.getStatus());
         assertEquals(1, encomenda.getItens().size());
 
-        encomenda.adicionarItem(new ItemEncomenda("Caneca", 5, "Logotipo azul", List.of()));
+        ItemEncomenda caneca = new ItemEncomenda("Caneca", 5, "Logotipo azul", List.of());
+        encomenda.adicionarItem(caneca);
 
         assertEquals(2, encomenda.getItens().size());
         assertEquals("Caneca", encomenda.getItens().getLast().getTipoProduto());
+        assertSame(caneca, encomenda.getItens().getLast());
+        encomenda.alterarItem(caneca, new ItemEncomenda("Caneca", 6, "Logotipo azul", List.of()));
+        assertEquals(6, caneca.getQuantidade());
+        assertThrows(IllegalStateException.class, () -> novaEncomenda().adicionarItem(caneca));
         assertThrows(UnsupportedOperationException.class, () -> encomenda.getItens().clear());
     }
 
@@ -77,6 +82,7 @@ class EncomendaTest {
         Encomenda encomenda = encomendaAprovada();
         ItemEncomenda item = encomenda.getItens().getFirst();
         encomenda.confirmarCiencia(0, RESPONSAVEL, APROVACAO);
+        encomenda.conferirMateriais(RESPONSAVEL, APROVACAO);
         SolicitacaoAlteracao solicitacao = encomenda.solicitarAlteracao(RESPONSAVEL, CanalOrigem.WHATSAPP,
                 ALTERACAO, new BigDecimal("120"), null, item, 12, "Nome em azul");
         solicitacao.autorizar(RESPONSAVEL, "Personalização atualizada", ALTERACAO);
@@ -101,8 +107,12 @@ class EncomendaTest {
         assertSame(RESPONSAVEL, registro.getAutor());
         assertTrue(registro.getDadosAnteriores().contains("100.00"));
         assertTrue(registro.getDadosAnteriores().contains("dourado"));
+        assertTrue(registro.getDadosAnteriores().contains("Aprovação: " + RESPONSAVEL.getNome() + " em " + APROVACAO));
+        assertTrue(registro.getDadosAnteriores().contains("Ciência: " + RESPONSAVEL.getNome() + " em " + APROVACAO));
+        assertTrue(registro.getDadosAnteriores().contains("Conferência de materiais: " + RESPONSAVEL.getNome() + " em " + APROVACAO));
         assertTrue(registro.getDadosNovos().contains("120.00"));
         assertTrue(registro.getDadosNovos().contains("azul"));
+        assertTrue(registro.getDadosNovos().contains("Ciência: Pendente"));
 
         encomenda.conferirMateriais(RESPONSAVEL, ALTERACAO);
         assertThrows(IllegalStateException.class, () -> encomenda.iniciarProducao(ALTERACAO));
@@ -173,6 +183,10 @@ class EncomendaTest {
         assertEquals(StatusSolicitacaoAlteracao.REJEITADA, solicitacao.getStatus());
         assertEquals("Prazo indisponível", solicitacao.getJustificativa());
         assertSame(RESPONSAVEL, solicitacao.getAnalisadaPor());
+        HistoricoEncomenda registro = encomenda.getHistorico().getFirst();
+        assertEquals(TipoEventoEncomenda.ALTERACAO_REJEITADA, registro.getOperacao());
+        assertEquals("Prazo indisponível", registro.getJustificativa());
+        assertSame(RESPONSAVEL, registro.getAutor());
         assertEquals(PRAZO, encomenda.getPrazoPrometido());
         assertThrows(IllegalStateException.class,
                 () -> encomenda.aplicarAlteracao(solicitacao, ALTERACAO, BigDecimal.ZERO));
@@ -194,6 +208,64 @@ class EncomendaTest {
                 () -> encomenda.aplicarAlteracao(segunda, ALTERACAO, BigDecimal.ZERO));
         assertEquals(11, item.getQuantidade());
         assertEquals(1, encomenda.getHistorico().size());
+
+        encomenda.conferirMateriais(RESPONSAVEL, ALTERACAO);
+        encomenda.confirmarCiencia(1, RESPONSAVEL, ALTERACAO);
+        encomenda.iniciarProducao(ALTERACAO);
+
+        assertEquals(StatusEncomenda.EM_PRODUCAO, encomenda.getStatus());
+        assertEquals(StatusSolicitacaoAlteracao.EXPIRADA, segunda.getStatus());
+        assertEquals(TipoEventoEncomenda.ALTERACAO_EXPIRADA, encomenda.getHistorico().getLast().getOperacao());
+    }
+
+    @Test
+    void prazoVigenteBloqueiaProducaoAteAExpiracao() {
+        Encomenda encomenda = encomendaAprovada();
+        SolicitacaoAlteracao solicitacao = encomenda.solicitarAlteracao(RESPONSAVEL, CanalOrigem.TELEFONE,
+                ALTERACAO, null, PRAZO.plusDays(1), null, null, null);
+        encomenda.conferirMateriais(RESPONSAVEL, ALTERACAO);
+        encomenda.confirmarCiencia(0, RESPONSAVEL, ALTERACAO);
+
+        assertThrows(IllegalStateException.class, () -> encomenda.iniciarProducao(LIMITE_ALTERACAO));
+        assertTrue(encomenda.getHistorico().isEmpty());
+        encomenda.iniciarProducao(LIMITE_ALTERACAO.plusSeconds(1));
+        assertEquals(StatusSolicitacaoAlteracao.EXPIRADA, solicitacao.getStatus());
+        assertEquals(TipoEventoEncomenda.ALTERACAO_EXPIRADA, encomenda.getHistorico().getFirst().getOperacao());
+    }
+
+    @Test
+    void cancelamentoRegistraAutorDataEEncerraPendencias() {
+        Encomenda encomenda = encomendaAprovada();
+        SolicitacaoAlteracao solicitacao = encomenda.solicitarAlteracao(RESPONSAVEL, CanalOrigem.TELEFONE,
+                ALTERACAO, null, PRAZO.plusDays(1), null, null, null);
+        ImpedimentoProducao impedimento = encomenda.registrarImpedimento("Falta material", RESPONSAVEL, ALTERACAO);
+
+        encomenda.cancelar(RESPONSAVEL, "Desistência do cliente", ALTERACAO);
+
+        assertEquals(StatusEncomenda.CANCELADA, encomenda.getStatus());
+        assertEquals(StatusSolicitacaoAlteracao.CANCELADA, solicitacao.getStatus());
+        assertTrue(!impedimento.estaAberto());
+        assertNull(impedimento.getResolvidoEm());
+        HistoricoEncomenda registro = encomenda.getHistorico().getFirst();
+        assertEquals(TipoEventoEncomenda.CANCELADA, registro.getOperacao());
+        assertSame(RESPONSAVEL, registro.getAutor());
+        assertEquals(ALTERACAO, registro.getOcorridaEm());
+    }
+
+    @Test
+    void casasDecimaisExcedentesSaoErrosDeValidacao() {
+        Encomenda encomenda = novaEncomenda();
+        IllegalArgumentException preco = assertThrows(IllegalArgumentException.class, () ->
+                encomenda.aprovar(new BigDecimal("100.005"), BigDecimal.ZERO, DUAS_HORAS, PRAZO,
+                        INICIO_PLANEJADO, LIMITE_ALTERACAO, RESPONSAVEL, APROVACAO));
+        assertTrue(preco.getMessage().contains("preço bruto"));
+
+        Material fita = new Material("Fita", "m");
+        IllegalArgumentException estoque = assertThrows(IllegalArgumentException.class,
+                () -> fita.registrarEntrada(new BigDecimal("0.0005"), RESPONSAVEL, ALTERACAO));
+        assertTrue(estoque.getMessage().contains("quantidade de entrada"));
+        fita.registrarEntrada(new BigDecimal("1.5000"), RESPONSAVEL, ALTERACAO);
+        assertEquals(new BigDecimal("1.500"), fita.getQuantidadeFisica());
     }
 
     private Encomenda encomendaAprovada() {

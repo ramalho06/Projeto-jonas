@@ -125,7 +125,10 @@ public class SolicitacaoAlteracao {
 
     public void rejeitar(Usuario analista, String motivo, Instant quando) {
         registrarAnalise(analista, motivo, quando);
+        StatusSolicitacaoAlteracao anterior = status;
         status = StatusSolicitacaoAlteracao.REJEITADA;
+        encomenda.registrarMudancaDeSolicitacao(TipoEventoEncomenda.ALTERACAO_REJEITADA,
+                analista, quando, anterior, this, justificativa);
     }
 
     public void confirmarConcordancia(Instant quando) {
@@ -145,14 +148,32 @@ public class SolicitacaoAlteracao {
                 && !quando.isAfter(encomenda.getLimiteAlteracao()))) {
             throw new IllegalStateException("A solicitação ainda não pode expirar.");
         }
+        StatusSolicitacaoAlteracao anterior = status;
+        String motivo = alteracoesNaSolicitacao == encomenda.getNumeroAlteracoes()
+                ? "O prazo para alterações terminou."
+                : "A solicitação foi baseada em uma especificação anterior.";
         status = StatusSolicitacaoAlteracao.EXPIRADA;
+        encomenda.registrarMudancaDeSolicitacao(TipoEventoEncomenda.ALTERACAO_EXPIRADA,
+                null, quando, anterior, this, motivo);
+    }
+
+    boolean bloqueiaProducaoEm(Instant quando) {
+        return estaEmAberto() && (quando.isBefore(solicitadaEm)
+                || (alteracoesNaSolicitacao == encomenda.getNumeroAlteracoes()
+                && !quando.isAfter(encomenda.getLimiteAlteracao())));
     }
 
     public boolean estaEmAberto() {
         return switch (status) {
             case PENDENTE, AGUARDANDO_CONCORDANCIA, AUTORIZADA -> true;
-            case APLICADA, REJEITADA, EXPIRADA -> false;
+            case APLICADA, REJEITADA, EXPIRADA, CANCELADA -> false;
         };
+    }
+
+    void cancelar() {
+        if (estaEmAberto()) {
+            status = StatusSolicitacaoAlteracao.CANCELADA;
+        }
     }
 
     void exigirAplicavel(Instant quando) {

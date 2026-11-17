@@ -2,7 +2,6 @@ package com.example.jonas_project.encomendas.dominio;
 
 import com.example.jonas_project.acesso.dominio.Usuario;
 import com.example.jonas_project.clientes.dominio.Cliente;
-import com.example.jonas_project.producao.dominio.ImpedimentoProducao;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -154,7 +153,8 @@ public class Encomenda {
 
     public void adicionarItem(ItemEncomenda item) {
         exigirStatus(StatusEncomenda.PENDENTE);
-        itens.add(Objects.requireNonNull(item).copiarPara(this, itens.size()));
+        Objects.requireNonNull(item).vincular(this, itens.size());
+        itens.add(item);
     }
 
     public void alterarItem(ItemEncomenda item, ItemEncomenda novosDados) {
@@ -235,12 +235,32 @@ public class Encomenda {
     }
 
     private String descreverAlteracao(ItemEncomenda item) {
-        String dados = "Preço total: " + precoTotal().toPlainString() + "; prazo: " + prazoPrometido;
+        String dados = "Preço total: " + precoTotal().toPlainString() + "\nPrazo: " + prazoPrometido
+                + "\nAprovação: " + descreverAcao(aprovadaPor, aprovadaEm)
+                + "\nCiência: " + descreverAcao(cienciaPor, cienciaEm)
+                + "\nConferência de materiais: " + descreverAcao(materiaisConferidosPor, materiaisConferidosEm);
         if (item == null) {
             return dados;
         }
-        return dados + "; item " + (item.getOrdem() + 1) + " (" + item.getTipoProduto() + ")"
-                + "; quantidade: " + item.getQuantidade() + "; personalização: " + item.getPersonalizacao();
+        return dados + "\nItem " + (item.getOrdem() + 1) + " (" + item.getTipoProduto() + ")"
+                + "\nQuantidade: " + item.getQuantidade() + "\nPersonalização: " + item.getPersonalizacao();
+    }
+
+    private String descreverAcao(Usuario autor, Instant quando) {
+        if (autor == null) {
+            return "Pendente";
+        }
+        String identificacao = autor.getId() == null ? autor.getNome() : autor.getNome() + " (#" + autor.getId() + ")";
+        return identificacao + " em " + quando;
+    }
+
+    void registrarMudancaDeSolicitacao(TipoEventoEncomenda evento, Usuario autor, Instant quando,
+                                        StatusSolicitacaoAlteracao anterior, SolicitacaoAlteracao solicitacao,
+                                        String justificativa) {
+        String referencia = solicitacao.getId() == null
+                ? "Solicitação de " + solicitacao.getSolicitadaEm() : "Solicitação #" + solicitacao.getId();
+        historico.add(new HistoricoEncomenda(this, autor, evento, quando,
+                referencia + ": " + anterior, referencia + ": " + solicitacao.getStatus(), justificativa, false));
     }
 
     private void exigirItemDaEncomenda(ItemEncomenda item) {
@@ -283,14 +303,19 @@ public class Encomenda {
         if (impedimentos.stream().anyMatch(ImpedimentoProducao::estaAberto)) {
             throw new IllegalStateException("Resolva os impedimentos antes de iniciar a produção.");
         }
-        if (solicitacoes.stream().anyMatch(SolicitacaoAlteracao::estaEmAberto)) {
-            throw new IllegalStateException("Resolva ou expire as solicitações de alteração em aberto.");
+        if (solicitacoes.stream().anyMatch(solicitacao -> solicitacao.bloqueiaProducaoEm(quando))) {
+            throw new IllegalStateException("Resolva as solicitações de alteração válidas em aberto.");
         }
         if (materiaisConferidosEm == null || quando.isBefore(materiaisConferidosEm)) {
             throw new IllegalStateException("Confira os materiais antes de iniciar a produção.");
         }
         if (cienciaEm == null || quando.isBefore(cienciaEm)) {
             throw new IllegalStateException("Confirme a leitura da especificação vigente antes de iniciar a produção.");
+        }
+        for (SolicitacaoAlteracao solicitacao : solicitacoes) {
+            if (solicitacao.estaEmAberto()) {
+                solicitacao.expirar(quando);
+            }
         }
         status = StatusEncomenda.EM_PRODUCAO;
     }
@@ -315,10 +340,20 @@ public class Encomenda {
         status = StatusEncomenda.ENTREGUE;
     }
 
-    public void cancelar(String justificativa) {
+    public void cancelar(Usuario autor, String justificativa, Instant quando) {
         exigirEmAberto();
+        Objects.requireNonNull(autor, "Informe quem cancelou a encomenda.");
+        Objects.requireNonNull(quando, "Informe quando a encomenda foi cancelada.");
+        if (quando.isBefore(cadastradaEm) || (aprovadaEm != null && quando.isBefore(aprovadaEm))
+                || solicitacoes.stream().anyMatch(solicitacao -> quando.isBefore(solicitacao.getSolicitadaEm()))) {
+            throw new IllegalArgumentException("A data do cancelamento antecede uma operação da encomenda.");
+        }
+        StatusEncomenda anterior = status;
         motivoCancelamento = texto(justificativa, "a justificativa do cancelamento");
         status = StatusEncomenda.CANCELADA;
+        solicitacoes.forEach(SolicitacaoAlteracao::cancelar);
+        historico.add(new HistoricoEncomenda(this, autor, TipoEventoEncomenda.CANCELADA, quando,
+                anterior.name(), status.name(), motivoCancelamento, false));
     }
 
     public boolean mesmaEncomenda(Encomenda outra) {

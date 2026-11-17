@@ -1,7 +1,6 @@
-package com.example.jonas_project.producao.dominio;
+package com.example.jonas_project.encomendas.dominio;
 
 import com.example.jonas_project.acesso.dominio.Usuario;
-import com.example.jonas_project.encomendas.dominio.Encomenda;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -53,7 +52,7 @@ public class ImpedimentoProducao {
     }
 
     public boolean estaAberto() {
-        return resolvidoEm == null;
+        return resolvidoEm == null && encomenda.getStatus() != StatusEncomenda.CANCELADA;
     }
 
     public void resolver(Instant quando) {

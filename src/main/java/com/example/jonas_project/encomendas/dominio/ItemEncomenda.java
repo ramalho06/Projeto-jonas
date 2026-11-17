@@ -60,11 +60,12 @@ public class ItemEncomenda {
         this.materiais.addAll(copiarMateriais(materiais));
     }
 
-    ItemEncomenda copiarPara(Encomenda encomenda, int ordem) {
-        ItemEncomenda copia = new ItemEncomenda(getTipoProduto(), getQuantidade(), getPersonalizacao(), getMateriais());
-        copia.encomenda = encomenda;
-        copia.ordem = ordem;
-        return copia;
+    void vincular(Encomenda encomenda, int ordem) {
+        if (this.encomenda != null) {
+            throw new IllegalStateException("O item já está vinculado a uma encomenda.");
+        }
+        this.encomenda = encomenda;
+        this.ordem = ordem;
     }
 
     void alterar(ItemEncomenda novosDados) {

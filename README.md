@@ -13,7 +13,8 @@ pagamentos.
 
 O projeto adota um **monólito modular em Spring Boot com modelagem orientada
 ao domínio (DDD)**. O código é organizado por área do negócio em `acesso`,
-`clientes`, `encomendas`, `producao`, `financeiro` e `estoque`.
+`clientes`, `encomendas`, `financeiro` e `estoque`. Os impedimentos de produção
+integram o domínio de encomendas.
 Cada área reúne as entidades, os tipos e as regras no seu pacote `dominio`.
 
 Um único processo e um banco PostgreSQL simplificam a execução e a manutenção

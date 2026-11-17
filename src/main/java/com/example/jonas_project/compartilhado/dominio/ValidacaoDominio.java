@@ -2,7 +2,6 @@ package com.example.jonas_project.compartilhado.dominio;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Objects;
 
 public final class ValidacaoDominio {
     private ValidacaoDominio() {
@@ -16,11 +15,17 @@ public final class ValidacaoDominio {
     }
 
     public static BigDecimal decimalNaoNegativo(BigDecimal valor, int escala, String campo) {
-        Objects.requireNonNull(valor, "Informe " + campo + ".");
+        if (valor == null) {
+            throw new IllegalArgumentException("Informe " + campo + ".");
+        }
         if (valor.signum() < 0) {
             throw new IllegalArgumentException(campo + " deve ser maior ou igual a zero.");
         }
-        return valor.setScale(escala, RoundingMode.UNNECESSARY);
+        try {
+            return valor.setScale(escala, RoundingMode.UNNECESSARY);
+        } catch (ArithmeticException erro) {
+            throw new IllegalArgumentException(campo + " admite até " + escala + " casas decimais.", erro);
+        }
     }
 
     public static BigDecimal decimalPositivo(BigDecimal valor, int escala, String campo) {

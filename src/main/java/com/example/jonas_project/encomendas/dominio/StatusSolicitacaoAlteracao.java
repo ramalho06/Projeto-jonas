@@ -6,5 +6,6 @@ public enum StatusSolicitacaoAlteracao {
     AUTORIZADA,
     APLICADA,
     REJEITADA,
-    EXPIRADA
+    EXPIRADA,
+    CANCELADA
 }

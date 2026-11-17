@@ -53,7 +53,7 @@ classDiagram
         +iniciarProducao(Instant quando) void
         +marcarPronta() void
         +registrarEntrega(Usuario autor, Instant quando, ModalidadeEntrega modalidade, BigDecimal saldoEmAberto) void
-        +cancelar(String justificativa) void
+        +cancelar(Usuario autor, String justificativa, Instant quando) void
         +precoTotal() BigDecimal
     }
 
@@ -92,6 +92,7 @@ classDiagram
         -String personalizacao
         -List~MaterialNecessario~ materiais
         ~alterar(ItemEncomenda novosDados) void
+        ~vincular(Encomenda encomenda, int ordem) void
         ~aplicarAlteracao(Integer novaQuantidade, String novaPersonalizacao) void
     }
 
@@ -172,6 +173,7 @@ classDiagram
         +rejeitar(Usuario analista, String motivo, Instant quando) void
         +confirmarConcordancia(Instant quando) void
         +expirar(Instant quando) void
+        ~cancelar() void
         +estaEmAberto() boolean
         ~marcarAplicada() void
     }
@@ -184,6 +186,7 @@ classDiagram
         APLICADA
         REJEITADA
         EXPIRADA
+        CANCELADA
     }
 
     class HistoricoEncomenda {
