@@ -31,6 +31,7 @@ public class SegurancaConfig {
                 .authorizeHttpRequests(rotas -> rotas
                         .requestMatchers(HttpMethod.POST, "/auth/cadastro", "/auth/login").permitAll()
                         .requestMatchers("/error").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/clientes").hasAnyAuthority("SCOPE_ADMINISTRADOR", "SCOPE_FUNCIONARIO")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(recurso -> recurso.jwt(Customizer.withDefaults()))
                 .build();
