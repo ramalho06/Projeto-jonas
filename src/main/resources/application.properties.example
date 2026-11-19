@@ -1,0 +1,9 @@
+# Copie para application.properties e preencha os valores locais (application.properties não é versionado).
+spring.application.name=jonas-project
+spring.jpa.hibernate.ddl-auto=validate
+spring.datasource.url=jdbc:postgresql://localhost:5432/celebra
+spring.datasource.username=
+spring.datasource.password=
+spring.mvc.problemdetails.enabled=true
+# Segredo HMAC do JWT: no mínimo 32 caracteres. Gere um com: openssl rand -base64 32
+app.jwt.segredo=
